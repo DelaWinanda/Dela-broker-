@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IoT CONTROL PANEL</title>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg-primary: #0a0a0f;
+      --color-bg-secondary: #12121a;
+      --color-bg-tertiary: #1a1a26;
+      --color-pink-primary: #ff2d78;
+      --color-pink-soft: #ff6ba8;
+      --color-pink-glow: rgba(255, 45, 120, 0.3);
+      --color-pink-dim: rgba(255, 45, 120, 0.1);
+      --color-green-on: #00ff88;
+      --color-red-off: #ff4466;
+      --color-yellow-warn: #ffcc00;
+    }
+
+    body { 
+      font-family: 'Rajdhani', sans-serif; 
+      background-color: var(--color-bg-primary); 
+      color: #f0e6ef; 
+      min-height: 100vh;
+    }
+
+    .data-font { font-family: 'Share Tech Mono', monospace; }
+    .neon-text { text-shadow: 0 0 10px var(--color-pink-glow), 0 0 20px var(--color-pink-glow); }
+
+    /* Broker Status Cards */
+    .broker-card { border-left: 2px solid var(--color-yellow-warn); transition: border-color 0.3s; }
+    .broker-card.connected { border-left-color: var(--color-green-on); }
+    .broker-card.error, .broker-card.offline { border-left-color: var(--color-red-off); }
+
+    .status-dot { transition: all 0.3s ease; background-color: var(--color-red-off); }
+    .status-dot.connected { background-color: var(--color-green-on); box-shadow: 0 0 8px var(--color-green-on); }
+    .status-dot.connecting { background-color: var(--color-yellow-warn); animation: pulse-yellow 1s infinite; }
+    @keyframes pulse-yellow { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    /* Relay Wraps & Buttons */
+    .relay-wrap { transition: all 0.3s ease; }
+    .relay-wrap.active {
+      border-color: rgba(255, 45, 120, 0.4);
+      box-shadow: 0 0 15px rgba(255, 45, 120, 0.1);
+    }
+    .relay-wrap.active h3 { color: var(--color-pink-soft); }
+    
+    .btn-relay { transition: all 0.3s ease; }
+    .btn-relay.on {
+      background-color: var(--color-pink-dim);
+      border-color: var(--color-pink-primary);
+      color: var(--color-pink-primary);
+      box-shadow: 0 0 10px rgba(255, 45, 120, 0.2);
+    }
+
+    /* Pattern LEDs */
+    .box-led { transition: all 0.1s; border-color: rgba(255, 255, 255, 0.1); }
+    .box-led.active { 
+      background-color: var(--color-pink-primary); 
+      box-shadow: 0 0 12px var(--color-pink-primary); 
+      border-color: var(--color-pink-primary); 
+    }
+
+    /* Mic Button */
+    .mic-btn { transition: all 0.3s; }
+    .mic-btn:hover { box-shadow: 0 0 15px var(--color-pink-glow); }
+    .mic-btn.listening {
+      background-color: var(--color-pink-dim);
+      box-shadow: 0 0 25px var(--color-pink-glow);
+      animation: pulse-pink 1.5s infinite;
+      border-color: #fff;
+      color: #fff;
+    }
+    @keyframes pulse-pink {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 45, 120, 0.7); }
+      70% { transform: scale(1.1); box-shadow: 0 0 0 15px rgba(255, 45, 120, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 45, 120, 0); }
+    }
+
+    .log-entry { animation: fade-in 0.3s ease; }
+    @keyframes fade-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+    .text-error { color: var(--color-red-off); }
+    .text-success { color: var(--color-green-on); }
+    .text-neutral { color: #7a6a78; }
+    
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--color-bg-secondary); }
+    ::-webkit-scrollbar-thumb { background: var(--color-bg-tertiary); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--color-pink-dim); }
+  </style>
+</head>
+<body class="flex flex-col p-4 md:p-6 overflow-x-hidden">
+
+<div class="w-full max-w-6xl mx-auto h-full flex flex-col">
+  
+  <!-- HEADER -->
+  <header class="flex justify-between items-end mb-6 border-b border-pink-primary/20 pb-4">
+    <div>
+      <h1 class="text-3xl md:text-4xl font-bold tracking-widest text-[#ff2d78] neon-text">IOT CONTROL PANEL</h1>
+      <p class="text-[#7a6a78] font-semibold text-xs md:text-sm tracking-[0.2em] mt-1">ESP32 &middot; DHT11 &middot; 4 RELAY</p>
+    </div>
+    <div class="hidden sm:flex gap-4 items-center">
+      <div class="text-right">
+        <p class="text-[10px] text-[#7a6a78] uppercase tracking-tighter">System Pulse</p>
+        <p class="data-font text-[#ff2d78]">ONLINE 100%</p>
+      </div>
+      <div class="w-12 h-12 rounded-full border border-pink-primary/30 flex items-center justify-center">
+        <div class="w-2 h-2 rounded-full bg-pink-primary animate-pulse"></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="grid grid-cols-1 md:grid-cols-12 gap-6 flex-1 min-h-0 container-content">
+    
+    <!-- LEFT COLUMN: SENSORS & STATUS -->
+    <div class="md:col-span-4 flex flex-col gap-6">
+      
+      <!-- SENSOR MONITOR -->
+      <div class="bg-bg-secondary border border-pink-primary/10 rounded-xl p-6 flex flex-col justify-between relative overflow-hidden h-full min-h-[260px]">
+        <div class="absolute top-0 right-0 p-2 opacity-10">
+          <svg width="120" height="120" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2c-1.1 0-2 .9-2 2v10.1c-1.2.7-2 2-2 3.4 0 2.2 1.8 4 4 4s4-1.8 4-4c0-1.4-.8-2.7-2-3.4V4c0-1.1-.9-2-2-2z"/></svg>
+        </div>
+        <p class="text-xs text-[#7a6a78] uppercase tracking-widest mb-4">Live Telemetry</p>
+        <div class="space-y-6 relative z-10">
+          <div>
+            <div class="flex justify-between items-baseline mb-1">
+              <span class="text-pink-soft text-sm font-bold tracking-widest">TEMPERATURE</span>
+            </div>
+            <div class="text-6xl font-bold data-font text-[#f0e6ef]" id="main-suhu">
+              --<span class="text-2xl text-pink-primary ml-1">°C</span>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between items-baseline mb-1">
+              <span class="text-cyan-400 text-sm font-bold tracking-widest">HUMIDITY</span>
+            </div>
+            <div class="text-6xl font-bold data-font text-[#f0e6ef]" id="main-kelembaban">
+              --<span class="text-2xl text-cyan-500 ml-1">%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BROKER STATUS -->
+      <div class="flex flex-col gap-3" id="broker-container">
+        <!-- Populated by JS -->
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN: CONTROLS -->
+    <div class="md:col-span-8 flex flex-col gap-6">
+
+      <!-- RELAY CONTROL -->
+      <div class="grid grid-cols-2 lg:grid-cols-2 gap-4">
+         <div id="wrap-relay1" class="relay-wrap bg-bg-secondary p-5 rounded-xl border border-white/5 flex items-center justify-between">
+           <div>
+             <h3 class="text-white/40 font-bold text-lg md:text-xl transition-colors">Relay 01</h3>
+             <p class="text-[10px] text-[#7a6a78] mt-1 uppercase tracking-widest">Lampu 1</p>
+           </div>
+           <button id="btn-relay1" class="btn-relay px-6 py-2 rounded-full border border-white/10 text-white/40 font-bold text-sm tracking-widest outline-none cursor-pointer" onclick="toggleRelay(1)">OFF</button>
+         </div>
+         <div id="wrap-relay2" class="relay-wrap bg-bg-secondary p-5 rounded-xl border border-white/5 flex items-center justify-between">
+           <div>
+             <h3 class="text-white/40 font-bold text-lg md:text-xl transition-colors">Relay 02</h3>
+             <p class="text-[10px] text-[#7a6a78] mt-1 uppercase tracking-widest">Lampu 2</p>
+           </div>
+           <button id="btn-relay2" class="btn-relay px-6 py-2 rounded-full border border-white/10 text-white/40 font-bold text-sm tracking-widest outline-none cursor-pointer" onclick="toggleRelay(2)">OFF</button>
+         </div>
+         <div id="wrap-relay3" class="relay-wrap bg-bg-secondary p-5 rounded-xl border border-white/5 flex items-center justify-between">
+           <div>
+             <h3 class="text-white/40 font-bold text-lg md:text-xl transition-colors">Relay 03</h3>
+             <p class="text-[10px] text-[#7a6a78] mt-1 uppercase tracking-widest">Lampu 3</p>
+           </div>
+           <button id="btn-relay3" class="btn-relay px-6 py-2 rounded-full border border-white/10 text-white/40 font-bold text-sm tracking-widest outline-none cursor-pointer" onclick="toggleRelay(3)">OFF</button>
+         </div>
+         <div id="wrap-relay4" class="relay-wrap bg-bg-secondary p-5 rounded-xl border border-white/5 flex items-center justify-between">
+           <div>
+             <h3 class="text-white/40 font-bold text-lg md:text-xl transition-colors">Relay 04</h3>
+             <p class="text-[10px] text-[#7a6a78] mt-1 uppercase tracking-widest">Lampu 4</p>
+           </div>
+           <button id="btn-relay4" class="btn-relay px-6 py-2 rounded-full border border-white/10 text-white/40 font-bold text-sm tracking-widest outline-none cursor-pointer" onclick="toggleRelay(4)">OFF</button>
+         </div>
+      </div>
+      
+      <!-- ALL CONTROL BTNS -->
+      <div class="flex gap-4">
+         <button class="flex-1 py-3 border border-pink-primary/30 text-pink-soft bg-pink-primary/10 font-bold rounded-xl active:scale-95 transition-transform text-sm tracking-widest uppercase cursor-pointer shadow-[0_0_15px_rgba(255,45,120,0.1)] outline-none" onclick="setAllRelays('ON')">Semua ON</button>
+         <button class="flex-1 py-3 border border-white/10 text-[#7a6a78] bg-white/5 font-bold rounded-xl active:scale-95 transition-transform text-sm tracking-widest uppercase cursor-pointer outline-none" onclick="setAllRelays('OFF')">Semua OFF</button>
+      </div>
+
+      <!-- PATTERNS & VOICE -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        
+        <!-- Light Sequences -->
+        <div class="bg-bg-tertiary p-5 rounded-xl border border-white/5">
+          <h4 class="text-xs text-[#7a6a78] uppercase mb-5 tracking-widest">Light Sequence</h4>
+          <div class="flex gap-4 h-[100px]">
+            <div class="flex-1 flex flex-col justify-between">
+              <div>
+                <p class="text-xs mb-3 text-white/70">Pola 1: Maju &rarr;</p>
+                <div class="flex gap-1.5 mb-3" id="pola1-vis">
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="flex-1 py-1.5 bg-pink-primary/20 text-pink-primary border border-pink-primary font-bold text-[10px] rounded uppercase cursor-pointer active:scale-95 transition-transform" onclick="togglePattern(1, 'START')">Start</button>
+                <button class="flex-1 py-1.5 border border-white/20 text-white/40 font-bold text-[10px] rounded uppercase cursor-pointer active:scale-95 transition-transform" onclick="togglePattern(1, 'STOP')">Stop</button>
+              </div>
+            </div>
+            
+            <div class="w-[1px] bg-white/5"></div>
+            
+            <div class="flex-1 flex flex-col justify-between">
+              <div>
+                <p class="text-xs mb-3 text-white/70">Pola 2: &larr; Mundur</p>
+                <div class="flex gap-1.5 mb-3" id="pola2-vis">
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                  <div class="box-led w-4 h-4 rounded-sm bg-bg-secondary border"></div>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="flex-1 py-1.5 bg-white/10 text-white/80 border border-white/20 font-bold text-[10px] rounded uppercase cursor-pointer active:scale-95 transition-transform" onclick="togglePattern(2, 'START')">Start</button>
+                <button class="flex-1 py-1.5 border border-white/20 text-white/40 font-bold text-[10px] rounded uppercase cursor-pointer active:scale-95 transition-transform" onclick="togglePattern(2, 'STOP')">Stop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Voice Command -->
+        <div class="bg-bg-tertiary p-5 rounded-xl border border-pink-primary/20 flex flex-col">
+          <h4 class="text-xs text-[#7a6a78] uppercase mb-4 tracking-widest w-full">Voice Command</h4>
+          <div class="flex gap-4 items-center flex-1">
+            <button id="mic-btn" class="mic-btn w-16 h-16 rounded-full border-2 border-pink-primary flex items-center justify-center relative text-pink-primary bg-bg-secondary shrink-0 cursor-pointer outline-none" onclick="startVoiceCmd()" title="Mulai Perintah Suara">
+              <svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+            </button>
+            <div class="bg-black/40 rounded p-3 flex-1 overflow-hidden h-full flex flex-col justify-center">
+              <p class="text-[10px] text-pink-soft mb-1 uppercase tracking-tighter italic">Status Listner</p>
+              <p id="voice-status" class="text-sm text-[#f0e6ef] truncate" title="Tap mic untuk perintah suara.">Tap mic untuk perintah suara.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ACTIVITY LOG -->
+      <div class="bg-bg-secondary flex-1 min-h-[140px] rounded-xl p-4 border border-white/5 flex flex-col">
+        <p class="text-[10px] text-[#7a6a78] uppercase mb-3 tracking-widest">Command History</p>
+        <div id="voice-log" class="space-y-2 data-font text-[11px] overflow-y-auto pr-2 flex-1">
+          <div class="flex justify-between log-entry text-[#7a6a78]">
+            <span>> SYSTEM: Ready.</span>
+            <span class="opacity-50">--:--:--</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  
+  <!-- FOOTER -->
+  <footer class="mt-4 flex justify-between items-center text-[10px] text-[#7a6a78] uppercase tracking-[0.3em] pb-2">
+    <div>PANEL VER. 2.0</div>
+    <div class="hidden sm:flex gap-4">
+      <span class="text-[#f0e6ef] opacity-50">Secure Mode</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  // ==========================================
+  // KONFIGURASI MQTT BROKERS
+  // ==========================================
+  const BROKERS = [
+    {
+      nama: "CloudAMQP",
+      url:  "wss://kingfisher.lmq.cloudamqp.com:15675/ws",
+      user: "azfrfvzw:azfrfvzw",
+      pass: "HMxpFwhwM9i7bDo2bp8XoBipnq2ZcmxQ",
+      clientId: "WebClient_CloudAMQP_" + Math.random().toString(16).substr(2,6)
+    },
+    {
+      nama: "Cedalo",
+      url:  "wss://pf-26xt4cmufmfw6kr1zpyq.cedalo.cloud:443",
+      user: "Web2",
+      pass: "d",
+      clientId: "WebClient_Cedalo_" + Math.random().toString(16).substr(2,6)
+    },
+    {
+      nama: "Flespi",
+      url:  "wss://mqtt.flespi.io:443",
+      user: "UJyFksta5S1kfEMf95YVPQIn0X2o9u4OFvWvVeAMuGEORyCzS5elmDywO9xhS5ay",
+      pass: "",
+      clientId: "WebClient_Flespi_" + Math.random().toString(16).substr(2,6)
+    }
+  ];
+
+  const clients = [];
+  let latestSuhuSensor = null;
+  let latestKelembabanSensor = null;
+
+  // ==========================================
+  // SETUP UI BROKER CARDS
+  // ==========================================
+  const brokerContainer = document.getElementById('broker-container');
+  BROKERS.forEach((b, idx) => {
+    brokerContainer.innerHTML += `
+      <div class="bg-bg-tertiary p-3 rounded-lg flex items-center justify-between border-l-2 broker-card relative shadow-[0_4px_10px_rgba(0,0,0,0.2)]" id="card-${idx}">
+        <div>
+          <p class="text-xs font-bold text-[#f0e6ef]">${b.nama}</p>
+          <p class="text-[10px] data-font text-[#7a6a78] mt-1 truncate max-w-[200px]">${b.url}</p>
+          <div class="text-[11px] data-font text-[#7a6a78] mt-2 flex gap-3">
+            <span>S: <span id="suhu-${idx}" class="text-[#f0e6ef]">—</span></span>
+            <span>H: <span id="hum-${idx}" class="text-[#f0e6ef]">—</span></span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 absolute top-3 right-3">
+          <span class="status-dot w-2 h-2 rounded-full connecting" id="status-dot-${idx}"></span>
+        </div>
+      </div>
+    `;
+  });
+
+  // ==========================================
+  // INIT MQTT KLIENTS
+  // ==========================================
+  BROKERS.forEach((b, idx) => {
+    const client = mqtt.connect(b.url, {
+      username: b.user,
+      password: b.pass,
+      clientId: b.clientId,
+      reconnectPeriod: 5000,
+    });
+    
+    client.on('connect', () => {
+      const dot = document.getElementById(`status-dot-${idx}`);
+      const card = document.getElementById(`card-${idx}`);
+      dot.className = 'status-dot w-2 h-2 rounded-full connected';
+      card.className = card.className.replace(/error|offline|connecting/g, '').trim() + ' connected';
+      
+      client.subscribe('sensor/suhu');
+      client.subscribe('sensor/kelembaban');
+      logAction(`[MQTT: ${b.nama}] \u2192 Connected`, 'text-success');
+    });
+
+    client.on('reconnect', () => {
+      const dot = document.getElementById(`status-dot-${idx}`);
+      const card = document.getElementById(`card-${idx}`);
+      dot.className = 'status-dot w-2 h-2 rounded-full connecting';
+      card.className = card.className.replace(/error|offline|connected/g, '').trim();
+    });
+
+    client.on('offline', () => {
+      const dot = document.getElementById(`status-dot-${idx}`);
+      const card = document.getElementById(`card-${idx}`);
+      dot.className = 'status-dot w-2 h-2 rounded-full offline';
+      card.className = card.className.replace(/connected|connecting/g, '').trim() + ' offline';
+    });
+
+    client.on('error', (err) => {
+      const dot = document.getElementById(`status-dot-${idx}`);
+      const card = document.getElementById(`card-${idx}`);
+      dot.className = 'status-dot w-2 h-2 rounded-full error';
+      card.className = card.className.replace(/connected|connecting/g, '').trim() + ' error';
+      logAction(`[ERROR: ${b.nama}] \u2192 ${err.message}`, 'text-error');
+    });
+
+    client.on('message', (topic, message) => {
+      const val = message.toString();
+      
+      if (topic === 'sensor/suhu') {
+        document.getElementById(`suhu-${idx}`).innerText = val + "°";
+        document.getElementById('main-suhu').innerHTML = `${val}<span class="text-2xl text-pink-primary ml-1">°C</span>`;
+        latestSuhuSensor = val;
+      } else if (topic === 'sensor/kelembaban') {
+        document.getElementById(`hum-${idx}`).innerText = val + "%";
+        document.getElementById('main-kelembaban').innerHTML = `${val}<span class="text-2xl text-cyan-500 ml-1">%</span>`;
+        latestKelembabanSensor = val;
+      }
+    });
+
+    clients.push({ name: b.nama, client: client });
+  });
+
+  // ==========================================
+  // KENDALI PUBLISH MQTT
+  // ==========================================
+  function publishAll(topic, message) {
+    let sent = 0;
+    clients.forEach(c => {
+      if (c.client.connected) {
+        c.client.publish(topic, message);
+        sent++;
+      }
+    });
+    if(sent > 0) {
+      logAction(`[PUB] ${topic} \u2192 ${message} (${sent} node)`, 'text-pink-soft opacity-90');
+    } else {
+      logAction(`[PUB] FAIL: ${topic} \u2192 No nodes active`, 'text-error');
+    }
+  }
+
+  // ==========================================
+  // RELAY LOGIC
+  // ==========================================
+  const relayState = { 1: false, 2: false, 3: false, 4: false };
+
+  function updateRelayBtn(num, stateStr) {
+    const btn = document.getElementById(`btn-relay${num}`);
+    const wrap = document.getElementById(`wrap-relay${num}`);
+    if(stateStr === 'ON') {
+      btn.classList.add('on');
+      btn.innerText = 'ON';
+      if(wrap) wrap.classList.add('active');
+      relayState[num] = true;
+    } else {
+      btn.classList.remove('on');
+      btn.innerText = 'OFF';
+      if(wrap) wrap.classList.remove('active');
+      relayState[num] = false;
+    }
+  }
+
+  function toggleRelay(num) {
+    const targetState = relayState[num] ? 'OFF' : 'ON';
+    publishAll(`kontrol/relay${num}`, targetState);
+    updateRelayBtn(num, targetState);
+    stopPatterns();
+  }
+
+  function setAllRelays(stateStr) {
+    for(let i=1; i<=4; i++) {
+      publishAll(`kontrol/relay${i}`, stateStr);
+      updateRelayBtn(i, stateStr);
+    }
+    stopPatterns();
+  }
+
+  // ==========================================
+  // POLA LAMPU LOGIC
+  // ==========================================
+  let patternInterval = null;
+
+  function animatePattern(visId, direction) {
+    clearInterval(patternInterval);
+    const boxes = document.querySelectorAll(`#${visId} .box-led`);
+    let idx = direction === 'maju' ? 0 : 3;
+    patternInterval = setInterval(() => {
+      boxes.forEach(b => b.classList.remove('active'));
+      boxes[idx].classList.add('active');
+      if(direction === 'maju') {
+        idx = (idx + 1) % 4;
+      } else {
+        idx = (idx - 1 + 4) % 4;
+      }
+    }, 300);
+  }
+
+  function stopPatterns() {
+    clearInterval(patternInterval);
+    document.querySelectorAll('.box-led').forEach(b => b.classList.remove('active'));
+  }
+
+  function togglePattern(num, stateStr) {
+    publishAll(`kontrol/variasi1`, 'STOP');
+    publishAll(`kontrol/variasi2`, 'STOP');
+    stopPatterns();
+
+    if (stateStr === 'START') {
+      publishAll(`kontrol/variasi${num}`, 'START');
+      animatePattern(`pola${num}-vis`, num === 1 ? 'maju' : 'mundur');
+      for(let i=1; i<=4; i++) updateRelayBtn(i, 'OFF'); 
+    }
+  }
+
+  // ==========================================
+  // PERINTAH SUARA (WEBSPEECH API)
+  // ==========================================
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.lang = 'id-ID';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      document.getElementById('mic-btn').classList.add('listening');
+      document.getElementById('voice-status').innerText = "Mendengarkan...";
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript.toLowerCase().trim();
+      document.getElementById('voice-status').innerText = `"${transcript}"`;
+      processVoiceCommand(transcript);
+    };
+
+    recognition.onerror = (event) => {
+      document.getElementById('voice-status').innerText = `Error: ${event.error}`;
+      logAction(`[VOICE] Error: ${event.error}`, 'text-error');
+    };
+
+    recognition.onend = () => {
+      document.getElementById('mic-btn').classList.remove('listening');
+      const statusText = document.getElementById('voice-status').innerText;
+      if (!statusText.startsWith('"') && !statusText.startsWith('Error')) {
+        document.getElementById('voice-status').innerText = "Tap mic untuk perintah suara.";
+      }
+    };
+  } else {
+    document.getElementById('voice-status').innerText = "Not Supported by Browser";
+    document.getElementById('voice-status').classList.replace("text-[#f0e6ef]", "text-error");
+    document.getElementById('mic-btn').style.opacity = "0.3";
+    document.getElementById('mic-btn').style.cursor = "not-allowed";
+  }
+
+  function startVoiceCmd() {
+    if(recognition) {
+      document.getElementById('voice-status').innerText = "Mempersiapkan mic...";
+      recognition.start();
+    }
+  }
+
+  function processVoiceCommand(cmd) {
+    if (cmd.includes('hidupkan lampu satu') || cmd.includes('nyalakan lampu 1') || cmd.includes('nyalakan lampu satu')) {
+      updateRelayBtn(1, 'ON'); publishAll('kontrol/relay1', 'ON'); stopPatterns();
+    } else if (cmd.includes('matikan lampu satu') || cmd.includes('padamkan lampu 1') || cmd.includes('matikan lampu 1')) {
+      updateRelayBtn(1, 'OFF'); publishAll('kontrol/relay1', 'OFF');
+    } else if (cmd.includes('hidupkan lampu dua') || cmd.includes('nyalakan lampu 2') || cmd.includes('nyalakan lampu dua')) {
+      updateRelayBtn(2, 'ON'); publishAll('kontrol/relay2', 'ON'); stopPatterns();
+    } else if (cmd.includes('matikan lampu dua') || cmd.includes('padamkan lampu 2') || cmd.includes('matikan lampu dua')) {
+      updateRelayBtn(2, 'OFF'); publishAll('kontrol/relay2', 'OFF');
+    } else if (cmd.includes('hidupkan lampu tiga') || cmd.includes('nyalakan lampu 3') || cmd.includes('nyalakan lampu tiga')) {
+      updateRelayBtn(3, 'ON'); publishAll('kontrol/relay3', 'ON'); stopPatterns();
+    } else if (cmd.includes('matikan lampu tiga') || cmd.includes('padamkan lampu 3') || cmd.includes('matikan lampu tiga')) {
+      updateRelayBtn(3, 'OFF'); publishAll('kontrol/relay3', 'OFF');
+    } else if (cmd.includes('hidupkan lampu empat') || cmd.includes('nyalakan lampu 4') || cmd.includes('nyalakan lampu empat') || cmd.includes('nyalakan lampu 4')) {
+      updateRelayBtn(4, 'ON'); publishAll('kontrol/relay4', 'ON'); stopPatterns();
+    } else if (cmd.includes('matikan lampu empat') || cmd.includes('padamkan lampu 4') || cmd.includes('matikan lampu empat')) {
+      updateRelayBtn(4, 'OFF'); publishAll('kontrol/relay4', 'OFF');
+    } else if (cmd.includes('hidupkan semua') || cmd.includes('nyalakan semua')) {
+      setAllRelays('ON'); stopPatterns();
+    } else if (cmd.includes('matikan semua') || cmd.includes('padamkan semua')) {
+      setAllRelays('OFF'); stopPatterns();
+    } else if (cmd.includes('hidupkan pola satu') || cmd.includes('mulai pola 1') || cmd.includes('mulai pola satu')) {
+      togglePattern(1, 'START');
+    } else if (cmd.includes('matikan pola satu') || cmd.includes('hentikan pola 1') || cmd.includes('hentikan pola satu')) {
+      togglePattern(1, 'STOP');
+    } else if (cmd.includes('hidupkan pola dua') || cmd.includes('mulai pola 2') || cmd.includes('mulai pola dua')) {
+      togglePattern(2, 'START');
+    } else if (cmd.includes('matikan pola dua') || cmd.includes('hentikan pola 2') || cmd.includes('hentikan pola dua')) {
+      togglePattern(2, 'STOP');
+    } else if (cmd.includes('info sensor') || cmd.includes('baca sensor') || cmd.includes('suhu') || cmd.includes('kelembaban') || cmd.includes('kelembapan')) {
+      speakSensorInfo();
+    } else {
+      logAction(`[CMD] Unrecognized: "${cmd}"`, 'text-error');
+    }
+    
+    // Log the valid command
+    if (!cmd.includes('info sensor') && !cmd.includes('baca sensor') && !cmd.includes('suhu') && !cmd.includes('kelembapan')) {
+      logAction(`[VOICE] \u2192 "${cmd}"`, 'text-neutral');
+    }
+  }
+
+  function speakSensorInfo() {
+    if ('speechSynthesis' in window) {
+      let msg = "";
+      if (latestSuhuSensor !== null && latestKelembabanSensor !== null) {
+        msg = `Suhu saat ini ${latestSuhuSensor} derajat celcius, kelembapan ${latestKelembabanSensor} persen.`;
+      } else {
+        msg = `Data sensor belum tersedia dari alat IoT.`;
+      }
+      const utterance = new SpeechSynthesisUtterance(msg);
+      utterance.lang = 'id-ID';
+      window.speechSynthesis.speak(utterance);
+      logAction(`[TTS] \u2192 Read Sensor Data`, 'text-neutral');
+    } else {
+      logAction('[SYSTEM] Browser tidak mendukung TTS', 'text-error');
+    }
+  }
+
+  // ==========================================
+  // LOGGER
+  // ==========================================
+  function logAction(msg, className = 'text-neutral') {
+    const logBox = document.getElementById('voice-log');
+    const d = new Date();
+    const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+    
+    const div = document.createElement('div');
+    div.className = `flex justify-between log-entry ${className}`;
+    div.innerHTML = `<span>> ${msg}</span><span class="opacity-50">${timeStr}</span>`;
+    
+    logBox.prepend(div);
+    
+    while(logBox.children.length > 5) {
+      logBox.removeChild(logBox.lastChild);
+    }
+  }
+</script>
+</body>
+</html>
