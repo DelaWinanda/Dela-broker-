@@ -289,13 +289,11 @@
       clientId: "WebClient_CloudAMQP_" + Math.random().toString(16).substr(2,6)
     },
     {
-      nama: "Cedalo",
-      url:  "wss://pf-26xt4cmufmfw6kr1zpyq.cedalo.cloud:443/mqtt", // Cedalo Mosquitto needs /mqtt
-      user: "Web2",
-      pass: "d",
-      // Menggunakan WebClient2 akan bentrok jika ESP32 juga menggunakannya, tapi ini satu-satunya yang diizinkan Cedalo.
-      // Oleh karena itu kita tambahkan random text. Ini akan "Connection Refused" di Web kecuali Anda menambahkannya di ACL dashboard Cedalo.
-      clientId: "WebClient2_" + Math.random().toString(16).substr(2,6) 
+      nama: "Shiftr.io",
+      url:  "wss://public.cloud.shiftr.io:443",
+      user: "public",
+      pass: "public",
+      clientId: "WebClient_Shiftr_" + Math.random().toString(16).substr(2,6)
     },
     {
       nama: "Flespi",
