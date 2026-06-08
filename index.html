@@ -283,7 +283,7 @@
   const BROKERS = [
     {
       nama: "CloudAMQP",
-      url:  "wss://kingfisher.lmq.cloudamqp.com/ws", // RabbitMQ Web MQTT default over TLS
+      url:  "wss://kingfisher.lmq.cloudamqp.com:15675/ws",
       user: "azfrfvzw:azfrfvzw",
       pass: "HMxpFwhwM9i7bDo2bp8XoBipnq2ZcmxQ",
       clientId: "WebClient_CloudAMQP_" + Math.random().toString(16).substr(2,6)
@@ -439,18 +439,11 @@
 
   function setAllRelays(stateStr) {
     stopPatterns();
-    
-    // Update semua UI relay sekaligus secara synchronous
+    // Update UI dan publish semua relay sekaligus tanpa delay
     for(let i = 1; i <= 4; i++) {
       updateRelayBtn(i, stateStr);
+      publishAll(`kontrol/relay${i}`, stateStr);
     }
-    
-    // Publish MQTT dengan jeda 100ms per relay agar broker tidak drop pesan
-    [1, 2, 3, 4].forEach((num, index) => {
-      setTimeout(() => {
-        publishAll(`kontrol/relay${num}`, stateStr);
-      }, index * 100);
-    });
   }
 
   // ==========================================
@@ -532,10 +525,41 @@
   }
 
   function startVoiceCmd() {
-    if(recognition) {
-      document.getElementById('voice-status').innerText = "Mempersiapkan mic...";
-      recognition.start();
-    }
+    if (!SpeechRecognition) return;
+    
+    // Buat ulang objek recognition setiap kali agar tidak error setelah onend
+    recognition = new SpeechRecognition();
+    recognition.lang = 'id-ID';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      document.getElementById('mic-btn').classList.add('listening');
+      document.getElementById('voice-status').innerText = "Mendengarkan...";
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript.toLowerCase().trim();
+      document.getElementById('voice-status').innerText = `"${transcript}"`;
+      processVoiceCommand(transcript);
+    };
+
+    recognition.onerror = (event) => {
+      document.getElementById('voice-status').innerText = `Error: ${event.error}`;
+      logAction(`[VOICE] Error: ${event.error}`, 'text-error');
+      document.getElementById('mic-btn').classList.remove('listening');
+    };
+
+    recognition.onend = () => {
+      document.getElementById('mic-btn').classList.remove('listening');
+      const statusText = document.getElementById('voice-status').innerText;
+      if (!statusText.startsWith('"') && !statusText.startsWith('Error')) {
+        document.getElementById('voice-status').innerText = "Tap mic untuk perintah suara.";
+      }
+    };
+
+    document.getElementById('voice-status').innerText = "Mempersiapkan mic...";
+    recognition.start();
   }
 
   function processVoiceCommand(cmd) {
