@@ -438,11 +438,13 @@
   }
 
   function setAllRelays(stateStr) {
-    for(let i=1; i<=4; i++) {
-      publishAll(`kontrol/relay${i}`, stateStr);
-      updateRelayBtn(i, stateStr);
-    }
     stopPatterns();
+    [1, 2, 3, 4].forEach((num, index) => {
+      setTimeout(() => {
+        publishAll(`kontrol/relay${num}`, stateStr);
+        updateRelayBtn(num, stateStr);
+      }, index * 150);
+    });
   }
 
   // ==========================================
