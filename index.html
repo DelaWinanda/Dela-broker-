@@ -439,11 +439,17 @@
 
   function setAllRelays(stateStr) {
     stopPatterns();
+    
+    // Update semua UI relay sekaligus secara synchronous
+    for(let i = 1; i <= 4; i++) {
+      updateRelayBtn(i, stateStr);
+    }
+    
+    // Publish MQTT dengan jeda 100ms per relay agar broker tidak drop pesan
     [1, 2, 3, 4].forEach((num, index) => {
       setTimeout(() => {
         publishAll(`kontrol/relay${num}`, stateStr);
-        updateRelayBtn(num, stateStr);
-      }, index * 150);
+      }, index * 100);
     });
   }
 
